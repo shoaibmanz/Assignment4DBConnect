@@ -12,10 +12,10 @@ public class Main extends Application {
 	@Override
 	public void start(Stage stage) throws Exception {
 		
-		Parent root = FXMLLoader.load(getClass().getResource("LoginView.fxml"));
+		Parent root = FXMLLoader.load(getClass().getResource("EditorView.fxml"));
 		
 		// load the login view in the start
-		stage.setScene(new Scene(root, 400, 300));
+		stage.setScene(new Scene(root, 800, 600));
 		stage.setTitle("DB Connect");
 		stage.show();
 	}

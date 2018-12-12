@@ -21,32 +21,26 @@ public class DatabaseController {
 	private static HashMap<SupportedDB, String> urlPrefix = new HashMap<SupportedDB, String>();
 	
 	static {
-		
+
 		classNames.put(SupportedDB.MySQL, "com.mysql.cj.jdbc.Driver");
 		urlPrefix.put(SupportedDB.MySQL, "jdbc:mysql:");
-		
-/*		String url = "jdbc:mysql://localhost:3306/Test";
-		
+
+		String url = "jdbc:mysql://localhost:3306/employees";
+
 		try {
-			Class.forName ("com.mysql.cj.jdbc.Driver");
-			
-			connection = DriverManager.getConnection (url, "shoaib", "shoaib");
+			Class.forName("com.mysql.cj.jdbc.Driver");
+
+			connection = DriverManager.getConnection(url, "shoaib", "shoaib");
 			connection.setAutoCommit(false);
-			
-		} catch (InstantiationException e) {
+		}
+		catch (ClassNotFoundException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		} catch (IllegalAccessException e) {
-			// TODO Auto-generated catch block 
-			e.printStackTrace();
-		}  catch (ClassNotFoundException e) {
+		} catch (SQLException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		}catch (SQLException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}		
-*/
+		}
+
 	}
 	
 	public static void MakeConnection(SupportedDB database, String dbname, String hostname, String port, String username, String password) throws Exception {
@@ -72,6 +66,12 @@ public class DatabaseController {
 		return connection.getCatalog();
 	}
 
+	public static void executeQuery(String SQLQuery) throws SQLException {
+		
+		Statement stmt = connection.createStatement();		
+		stmt.executeUpdate(SQLQuery);
+
+	}
 	
 	public static ResultSet fetchQuery(String SQLQuery) throws SQLException {
 		
@@ -82,6 +82,11 @@ public class DatabaseController {
 	public static void acceptChanges(CachedRowSet rowset) throws SQLException {
 		
 		rowset.acceptChanges(connection);
+	}
+	
+	public static void commit() throws SQLException {
+		
+		connection.commit();
 	}
 }
 /*		Statement statement = conn.createStatement();

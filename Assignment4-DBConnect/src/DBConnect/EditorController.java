@@ -26,15 +26,18 @@ import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.fxml.Initializable;
+import javafx.geometry.Insets;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.util.Callback;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TableColumn.CellDataFeatures;
 import javafx.scene.control.TableColumn.CellEditEvent;
 import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.layout.FlowPane;
 
 public class EditorController implements Initializable {
 
@@ -70,71 +73,114 @@ public class EditorController implements Initializable {
 	@FXML
 	private TextArea queryTextArea;
 
+	@FXML
+	private FlowPane inputFlowPane;
+	
+	@FXML
+	private String tableName;
+	
 	@Override
 	public void initialize(URL url, ResourceBundle bundle) {
 		
 		metadataTreeView.setRoot(this.makeMetadataTree());
-		
-		this.buildTable("Student");
 	}
 	
-	private TreeItem<ItemInfo> makeMetadataTree() {
-		
-		try {
-			DatabaseMetaData data = DatabaseController.getMetadata();
-
-			TreeItem<ItemInfo> root = new TreeItem<ItemInfo>(new ItemInfo(DatabaseController.getCatalog(), ItemType.Database));
-
-			String[] types = { "TABLE" };
-
-			ResultSet tables = data.getTables(null, null, "%", types);
-
-			while (tables.next()) {
-				
-				
-				String tableName = tables.getString(3);
-				
-				TreeItem<ItemInfo> tableItem = new TreeItem<ItemInfo>(new ItemInfo(tableName, ItemType.Table));
-				
-				ResultSet columns = data.getColumns(null, null, tableName, null);
-
-				while (columns.next()) {
-					
-					// get the column name and type
-					String type = columns.getString("TYPE_NAME");
-					String name = columns.getString("COLUMN_NAME");
-					
-		 			TreeItem<ItemInfo> columnItem = new TreeItem<ItemInfo>(new ItemInfo(name + ": " + type, ItemType.Column));
-					tableItem.getChildren().add(columnItem);
-				}
-			
-				root.getChildren().add(tableItem);
-			}
-			metadataTreeView.getSelectionModel().selectedItemProperty().addListener(new ChangeListener<TreeItem<ItemInfo>>() {
-
-				@Override
-				public void changed(ObservableValue<? extends TreeItem<ItemInfo>> observable, TreeItem<ItemInfo> oldValue, TreeItem<ItemInfo> newValue) {
-
-					ItemInfo selected = newValue.getValue();
-							
-					if (selected.Type().equals(ItemType.Table)) {
-						buildTable(selected.item);
-					}
-							
-				}
-			});
-						
-			return root;
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
-		
-		return null;
-	}
+	
 	
 	private CachedRowSet rowset;
 	
-	public void commitPressed() {
+	public void addButtonClicked() {
+		
+		if (tableName.equals(""))
+			return;
+		
+		ObservableList<Node> children = inputFlowPane.getChildren();
+		
+		String insertQuery = "Insert Into " + tableName + " Values (";
+		
+		for (int i = 0; i < children.size(); ++i) {
+			
+			TextField field = (TextField)children.get(i);
+			
+			insertQuery += "\"" + field.getText() + "\"";
+			
+			if (i < children.size() - 1) {
+				insertQuery += ", ";
+			}
+		}
+		
+		insertQuery += ");";
+		
+		
+		try {
+			
+			DatabaseController.executeQuery(insertQuery);
+					
+			//rowset.moveToInsertRow();
+			
+			ObservableList newRow = FXCollections.observableArrayList();
+			
+			for (int i = 1; i <= rowset.getMetaData().getColumnCount(); ++i) {
+				
+				TextField field = (TextField)children.get(i - 1);
+				
+				System.out.println(field.getText());
+				//rowset.updateString(i, field.getText());
+				newRow.add(field.getText());
+			}
+			//rowset.insertRow();		
+			//rowset.moveToCurrentRow();
+			
+			editorTableView.getItems().add(newRow);
+			editorTableView.refresh();	
+			
+			rowset = this.buildRowSet("SELECT * from " + tableName + " LIMIT 1000;");
+		} catch (SQLException e) {
+			
+			Alert alert = new Alert(AlertType.ERROR, e.getMessage(), ButtonType.OK);
+			alert.showAndWait();
+		}
+	}
+	
+	public void searchButtonClicked() throws SQLException {
+		
+		if (tableName.equals(""))
+			return;
+		
+		ObservableList<Node> children = inputFlowPane.getChildren();
+		
+		
+		for (int i = 1; i <= rowset.getMetaData().getColumnCount(); ++i) {
+			
+			TextField field = (TextField)children.get(i - 1);
+			
+			System.out.println(field.getText());
+		
+		}
+	}
+	
+	
+	public void removeButtonClicked() throws SQLException {
+		
+		MultipleSelectionModel msm = editorTableView.getSelectionModel();
+		
+		ObservableList<Integer> selected = msm.getSelectedIndices();
+		
+		for (int i = 0; i < selected.size(); ++i) {
+			
+			int index = selected.get(i).intValue();
+			editorTableView.getItems().remove(index);
+			
+			rowset.absolute(index + 1);
+			rowset.deleteRow();
+			rowset.moveToCurrentRow();
+		}
+		
+		editorTableView.refresh();
+	}
+	
+	
+	public void commitButtonClicked() {
 		
 		try {
 			Alert alert = new Alert(AlertType.CONFIRMATION, "Are you sure you wish to commit these changes?", ButtonType.OK, ButtonType.CANCEL);
@@ -151,41 +197,60 @@ public class EditorController implements Initializable {
 			
 		} catch (SQLException e) {
 			
-			Alert alert = new Alert(AlertType.ERROR, "Commit failed" + e.getMessage(), ButtonType.CLOSE);
+			Alert alert = new Alert(AlertType.ERROR, "Commit failed: " + e.getMessage(), ButtonType.CLOSE);
 			alert.showAndWait();
 		}
 	}
 	
 	private boolean hasEdited = false;
 	
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	public void buildTable(String tableName) {
+	private CachedRowSet buildRowSet(String query) throws SQLException {
 		
+		ResultSet rs = DatabaseController.fetchQuery(query);
+		
+		// creating a cached row set from the result set
+		RowSetFactory factory = RowSetProvider.newFactory();
+		CachedRowSet rowset = factory.createCachedRowSet();
+		rowset.populate(rs);
+		
+		return rowset;
+	}
+	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	public void buildTable() {
+		
+		// clearing flow pane
+		inputFlowPane.getChildren().clear();
+		
+		// clear table view items and columns
 		editorTableView.getItems().clear();
 		editorTableView.getColumns().clear();
 		
 		ObservableList<ObservableList> data = FXCollections.observableArrayList();
 		try {
+			// CHANGE THIS LATER AUHNFAINFOADNF
+			String SQLQuery = "SELECT * from " + tableName + " LIMIT 1000;";
 
-			String SQlQuery = "SELECT * from " + tableName + ";";
+			queryTextArea.setText(SQLQuery);
 			
-			queryTextArea.setText(SQlQuery);
-
-			ResultSet rs = DatabaseController.fetchQuery("Select * from " + tableName + ";");
+			rowset = buildRowSet(SQLQuery);
 			
-			// creating a cached row set from the result set
-			RowSetFactory factory = RowSetProvider.newFactory();
-			rowset = factory.createCachedRowSet();
-			rowset.populate(rs);
-			
-			
-			for (int i = 0; i < rs.getMetaData().getColumnCount(); i++) {
-
+			for (int i = 0; i < rowset.getMetaData().getColumnCount(); i++) {
+				
 				final int j = i;
 				
-				TableColumn col = new TableColumn(rs.getMetaData().getColumnName(i + 1));
+				String colName = rowset.getMetaData().getColumnName(i + 1);
+				TableColumn col = new TableColumn(colName);
 				
-				int type = rs.getMetaData().getColumnType(i + 1);
+				// creating the text field for input
+				TextField inputField = new TextField();
+				inputField.setPromptText(colName);
+				inputField.setPadding(new Insets(10, 10, 10, 10));
+			
+				
+				inputFlowPane.getChildren().add(inputField);
+				
+				int type = rowset.getMetaData().getColumnType(i + 1);
 				
 				col.setEditable(true);
 				col.setCellValueFactory( new Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>() {
@@ -233,7 +298,8 @@ public class EditorController implements Initializable {
 				});
 
 				col.setCellFactory( TextFieldTableCell.<ObservableList>forTableColumn());
-
+				
+				
 				editorTableView.getColumns().addAll(col);
 				System.out.println("Column [" + i + "] ");
 			}
@@ -250,8 +316,9 @@ public class EditorController implements Initializable {
 				
 				System.out.println("Row " + row + " ");
 			}
-
+			
 			editorTableView.setItems(data);
+			editorTableView.refresh();
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -320,71 +387,127 @@ public class EditorController implements Initializable {
 		return result;
 	}
 	
-	private Class<?> toClass(int type) {
+
+	private TreeItem<ItemInfo> makeMetadataTree() {
 		
-        Class<?> result = Object.class;
+		try {
+			DatabaseMetaData data = DatabaseController.getMetadata();
+			
+			String schemaName = DatabaseController.getCatalog();
+			TreeItem<ItemInfo> root = new TreeItem<ItemInfo>(new ItemInfo(schemaName, ItemType.Database));
 
-        switch (type) {
-            case Types.CHAR:
-            case Types.VARCHAR:
-            case Types.LONGVARCHAR:
-                result = String.class;
-                break;
+			String[] types = { "TABLE" };
 
-            case Types.NUMERIC:
-            case Types.DECIMAL:
-                result = java.math.BigDecimal.class;
-                break;
+			ResultSet tables = data.getTables(schemaName, null, "%", types);
 
-            case Types.BIT:
-                result = Boolean.class;
-                break;
+			while (tables.next()) {
+				
+				
+				String tableName = tables.getString(3);
+				
+				TreeItem<ItemInfo> tableItem = new TreeItem<ItemInfo>(new ItemInfo(tableName, ItemType.Table));
+				
+				ResultSet columns = data.getColumns(null, null, tableName, null);
 
-            case Types.TINYINT:
-                result = Byte.class;
-                break;
+				while (columns.next()) {
+					
+					// get the column name and type
+					String type = columns.getString("TYPE_NAME");
+					String name = columns.getString("COLUMN_NAME");
+					
+		 			TreeItem<ItemInfo> columnItem = new TreeItem<ItemInfo>(new ItemInfo(name + ": " + type, ItemType.Column));
+					tableItem.getChildren().add(columnItem);
+				}
+			
+				root.getChildren().add(tableItem);
+			}
+			metadataTreeView.getSelectionModel().selectedItemProperty().addListener(new ChangeListener<TreeItem<ItemInfo>>() {
 
-            case Types.SMALLINT:
-                result = Short.class;
-                break;
+				@Override
+				public void changed(ObservableValue<? extends TreeItem<ItemInfo>> observable, TreeItem<ItemInfo> oldValue, TreeItem<ItemInfo> newValue) {
 
-            case Types.INTEGER:
-                result = Integer.class;
-                break;
-
-            case Types.BIGINT:
-                result = Long.class;
-                break;
-
-            case Types.REAL:
-            case Types.FLOAT:
-                result = Float.class;
-                break;
-
-            case Types.DOUBLE:
-                result = Double.class;
-                break;
-
-            case Types.BINARY:
-            case Types.VARBINARY:
-            case Types.LONGVARBINARY:
-                result = Byte[].class;
-                break;
-
-            case Types.DATE:
-                result = java.sql.Date.class;
-                break;
-
-            case Types.TIME:
-                result = java.sql.Time.class;
-                break;
-
-            case Types.TIMESTAMP:
-                result = java.sql.Timestamp.class;
-                break;
-        }
-
-        return result;
-    }
-
+					ItemInfo selected = newValue.getValue();
+							
+					if (selected.Type().equals(ItemType.Table)) {
+						tableName = selected.item;
+						buildTable();
+					}
+							
+				}
+			});
+						
+			return root;
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		
+		return null;
+	}
 }
+
+//private Class<?> toClass(int type) {
+//	
+//    Class<?> result = Object.class;
+//
+//    switch (type) {
+//        case Types.CHAR:
+//        case Types.VARCHAR:
+//        case Types.LONGVARCHAR:
+//            result = String.class;
+//            break;
+//
+//        case Types.NUMERIC:
+//        case Types.DECIMAL:
+//            result = java.math.BigDecimal.class;
+//            break;
+//
+//        case Types.BIT:
+//            result = Boolean.class;
+//            break;
+//
+//        case Types.TINYINT:
+//            result = Byte.class;
+//            break;
+//
+//        case Types.SMALLINT:
+//            result = Short.class;
+//            break;
+//
+//        case Types.INTEGER:
+//            result = Integer.class;
+//            break;
+//
+//        case Types.BIGINT:
+//            result = Long.class;
+//            break;
+//
+//        case Types.REAL:
+//        case Types.FLOAT:
+//            result = Float.class;
+//            break;
+//
+//        case Types.DOUBLE:
+//            result = Double.class;
+//            break;
+//
+//        case Types.BINARY:
+//        case Types.VARBINARY:
+//        case Types.LONGVARBINARY:
+//            result = Byte[].class;
+//            break;
+//
+//        case Types.DATE:
+//            result = java.sql.Date.class;
+//            break;
+//
+//        case Types.TIME:
+//            result = java.sql.Time.class;
+//            break;
+//
+//        case Types.TIMESTAMP:
+//            result = java.sql.Timestamp.class;
+//            break;
+//    }
+//
+//    return result;
+//}
